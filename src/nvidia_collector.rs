@@ -2,11 +2,10 @@ use serde_json::{json, Value};
 use std::{process::Command, path::Path};
 
 pub fn collect_nvidia_json(complex: bool) -> Value {
-    // 컨테이너에서 nvidia-smi 주입 여부 체크
     if !Path::new("/usr/bin/nvidia-smi").exists()
         && which::which("nvidia-smi").is_err()
     {
-        return json!([]); // 호스트 GPU가 없음 or --gpus all 없이 실행됨
+        return json!([]);
     }
 
     if complex {
