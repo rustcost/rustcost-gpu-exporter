@@ -1,5 +1,43 @@
-use serde_json::{json, Value};
+use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::process::Command;
+
+#[derive(Debug, serde::Deserialize)]
+struct Card {
+    #[serde(rename = "GPU use (%)")]
+    gpu_utilization_percent: String,
+    #[serde(rename = "VRAM Total Memory (B)")]
+    gpu_memory_total: String,
+    #[serde(rename = "VRAM Total Used Memory (B)")]
+    gpu_memory_used: String,
+    #[serde(rename = "Card Series")]
+    series: String,
+    #[serde(rename = "Card SKU")]
+    sku: String,
+}
+
+impl Card {
+    fn name(&self) -> String {
+        format!("{} {}", self.series, self.sku)
+    }
+    fn gpu_utilization_percent(&self) -> u32 {
+        self.gpu_utilization_percent.parse::<u32>().unwrap_or(0)
+    }
+    #[allow(dead_code)]
+    fn gpu_memory_total_mib(&self) -> u32 {
+        (self.gpu_memory_total.parse::<u64>().unwrap_or(0) / 1024_u64.pow(2)) as u32
+    }
+    fn gpu_memory_total_mb(&self) -> u32 {
+        (self.gpu_memory_total.parse::<u64>().unwrap_or(0) / 1000_u64.pow(2)) as u32
+    }
+    #[allow(dead_code)]
+    fn gpu_memory_used_mib(&self) -> u32 {
+        (self.gpu_memory_used.parse::<u64>().unwrap_or(0) / 1024_u64.pow(2)) as u32
+    }
+    fn gpu_memory_used_mb(&self) -> u32 {
+        (self.gpu_memory_used.parse::<u64>().unwrap_or(0) / 1000_u64.pow(2)) as u32
+    }
+}
 
 pub fn collect_amd_json(_complex: bool) -> Value {
     // ROCm does not support advanced metrics consistently.
@@ -8,7 +46,12 @@ pub fn collect_amd_json(_complex: bool) -> Value {
 
 fn collect_amd_simple() -> Value {
     let out = Command::new("/opt/rocm/bin/rocm-smi")
-        .args(["--showuse", "--showmemuse", "--showtemp", "--json"])
+        .args([
+            "--showuse",
+            "--showproductname",
+            "--showmeminfo=vram",
+            "--json",
+        ])
         .output();
 
     let mut gpus = Vec::new();
@@ -16,49 +59,22 @@ fn collect_amd_simple() -> Value {
     if let Ok(o) = out {
         let raw = String::from_utf8_lossy(&o.stdout);
 
-        if let Ok(v) = serde_json::from_str::<Value>(&raw) {
-            if let Some(cards) = v.get("card") {
-                if let Some(map) = cards.as_object() {
-                    for (index, gpuinfo) in map {
-                        let idx = index.parse::<u32>().unwrap_or(0);
-
-                        let name = gpuinfo
-                            .get("Card series")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("Unknown AMD GPU");
-
-                        let util = gpuinfo
-                            .get("GPU use (%)")
-                            .and_then(|v| v.as_str())
-                            .and_then(|s| s.parse::<u32>().ok())
-                            .unwrap_or(0);
-
-                        let mem = gpuinfo
-                            .get("GPU Memory Usage (MB)")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("0 / 0");
-
-                        let parts: Vec<&str> = mem.split('/').map(|x| x.trim()).collect();
-                        let used = parts[0].parse::<u32>().unwrap_or(0);
-                        let total = parts[1].parse::<u32>().unwrap_or(0);
-
-                        let temp = gpuinfo
-                            .get("Temperature (Sensor edge) (C)")
-                            .and_then(|v| v.as_str())
-                            .and_then(|s| s.parse::<u32>().ok())
-                            .unwrap_or(0);
-
-                        gpus.push(json!({
-                            "index": idx,
-                            "name": name,
-                            "gpu_utilization_percent": util,
-                            "gpu_memory_used_mb": used,
-                            "gpu_memory_total_mb": total,
-                            "temperature_celsius": temp,
-                            "up": true
-                        }));
-                    }
-                }
+        if let Ok(v) = serde_json::from_str::<HashMap<String, Card>>(&raw) {
+            for (card_id, card) in v {
+                let idx = card_id
+                    .chars()
+                    .filter(|c| c.is_ascii_digit())
+                    .collect::<String>()
+                    .parse::<u32>()
+                    .unwrap_or(0);
+                gpus.push(json!({
+                    "index": idx,
+                    "name": card.name(),
+                    "gpu_utilization_percent": card.gpu_utilization_percent(),
+                    "gpu_memory_used_mb": card.gpu_memory_used_mb(),
+                    "gpu_memory_total_mb": card.gpu_memory_total_mb(),
+                    "up": true
+                }));
             }
         }
     }
