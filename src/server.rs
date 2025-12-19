@@ -1,9 +1,9 @@
 use std::sync::{Arc, Mutex};
 use tiny_http::{Header, Response, Server};
 
-pub fn run_server(metrics: Arc<Mutex<String>>) {
-    let server = Server::http("0.0.0.0:8000").unwrap();
-    println!("Serving metrics on http://localhost:8000/metrics");
+pub fn run_server(metrics: Arc<Mutex<String>>, port: &str) {
+    let server = Server::http(format!("0.0.0.0:{port}")).unwrap();
+    println!("Serving metrics on http://localhost:{port}/metrics");
 
     for req in server.incoming_requests() {
         if req.url() == "/metrics" {

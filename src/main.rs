@@ -49,5 +49,5 @@ fn main() {
         }
     });
 
-    server::run_server(metrics);
+    server::run_server(metrics, &port);
 }
